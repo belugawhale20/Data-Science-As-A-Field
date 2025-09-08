@@ -1,0 +1,128 @@
+---
+title: "NYPD Data Science Project"
+author: "Student"
+date: "2025-09-07"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+This analysis is to answer the question on how NYC shootings have been trending, and whether race is a factor for victims.
+
+The source of data is historic NYPD shooting incident data from Data.gov (link: https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic). This data contains a list of shooting incidents in NYC since 2006, including information about the incident time, location, as well as the perpetrator's and victim's race, gender, and age range.
+
+
+## Importing Data
+```{r get_nypd_data}
+library(tidyverse)
+library(readr)
+library(dplyr)
+library(ggplot2)
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nypd_data <- read_csv(url_in)
+```
+
+## Transforming Data
+```{r transform_nypd_data}
+# change factor columns to factor type
+nypd_data <- nypd_data %>% 
+  mutate(BORO = factor(BORO),
+         PERP_AGE_GROUP = factor(PERP_AGE_GROUP),
+         PERP_SEX = factor(PERP_SEX), 
+         PERP_RACE = factor(PERP_RACE),
+         VIC_AGE_GROUP = factor(VIC_AGE_GROUP),
+         VIC_SEX = factor(VIC_SEX), 
+         VIC_RACE = factor(VIC_RACE)
+         )
+
+# change occur_date to date type
+nypd_data <- nypd_data %>% mutate(OCCUR_DATE=mdy(OCCUR_DATE))
+
+# remove coordinate and lat, long columns that are not needed
+nypd_data <- nypd_data %>% select(-c(X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat))
+
+# show summary of transformed data
+summary(nypd_data)
+```
+
+## Visualizing Data
+```{r graph_total_incidents}
+incident_totals_by_year <- nypd_data %>% group_by(year(OCCUR_DATE)) %>% summarize(count_incidents=n_distinct(INCIDENT_KEY))
+
+incident_totals_by_year %>% ggplot(aes(x = `year(OCCUR_DATE)`, y = count_incidents)) + 
+  geom_line() + 
+  geom_point() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90)) +
+  scale_x_continuous( breaks = round(seq(min(incident_totals_by_year$`year(OCCUR_DATE)`),
+    max(incident_totals_by_year$`year(OCCUR_DATE)`), 
+    by = 2),1)) +
+  labs(title = "NYC Shootings Since 2006", y="Number of Shootings", x="Year")
+
+```
+
+```{r graph_victims_by_race}
+victims_by_year_native <- nypd_data %>% filter(VIC_RACE == "AMERICAN INDIAN/ALASKAN NATIVE") %>% group_by(year(OCCUR_DATE)) %>% summarize(count_native=n())
+victims_by_year_native$count_native[is.na(victims_by_year_native$count_native)] <- 0
+victims_by_year_asian_pacific_islander <- nypd_data %>% filter(VIC_RACE == "ASIAN / PACIFIC ISLANDER") %>% group_by(year(OCCUR_DATE)) %>% summarize(count_asian=n())
+victims_by_year_black <- nypd_data %>% filter(VIC_RACE == "BLACK") %>% group_by(year(OCCUR_DATE)) %>% summarize(count_black=n())
+victims_by_year_black_hispanic <- nypd_data %>% filter(VIC_RACE == "BLACK HISPANIC") %>% group_by(year(OCCUR_DATE)) %>% summarize(count_black_hispanic=n())
+victims_by_year_white <- nypd_data %>% filter(VIC_RACE == "WHITE") %>% group_by(year(OCCUR_DATE)) %>% summarize(count_white=n())
+victims_by_year_white_hispanic<- nypd_data %>% filter(VIC_RACE == "WHITE HISPANIC") %>% group_by(year(OCCUR_DATE)) %>% summarize(count_white_hispanic=n())
+victims_by_year_unknown <- nypd_data %>% filter(VIC_RACE == "UNKNOWN") %>% group_by(year(OCCUR_DATE)) %>% summarize(count_unknown=n())
+
+victims_by_race <- victims_by_year_native %>%
+  full_join(victims_by_year_asian_pacific_islander) %>%
+  full_join(victims_by_year_black) %>%
+  full_join(victims_by_year_black_hispanic) %>%
+  full_join(victims_by_year_white) %>%
+  full_join(victims_by_year_white_hispanic) %>%
+  full_join(victims_by_year_unknown)
+
+victims_by_race %>% ggplot(aes(x = `year(OCCUR_DATE)`, y = count_native)) + 
+  geom_line(aes(color="Native Victims")) + 
+  geom_point(aes(color="Native Victims")) +
+  geom_line(aes(y = count_asian, color="Asian / Pacific Islander Victims")) + 
+  geom_point(aes(y = count_asian, color="Asian / Pacific Islander Victims")) +
+  geom_line(aes(y = count_black, color="Black Victims")) + 
+  geom_point(aes(y = count_black, color="Black Victims")) +
+  geom_line(aes(y = count_black_hispanic, color="Black Hispanic Victims")) + 
+  geom_point(aes(y = count_black_hispanic, color="Black Hispanic Victims")) +
+  geom_line(aes(y = count_white, color="White Victims")) + 
+  geom_point(aes(y = count_white, color="White Victims")) +
+  geom_line(aes(y = count_white_hispanic, color="White Hispanic Victims")) + 
+  geom_point(aes(y = count_white_hispanic, color="White Hispanic Victims")) +
+  geom_line(aes(y = count_unknown, color="Unknown Victims")) +
+  geom_point(aes(y = count_unknown, color="Unknown Victims")) +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90)) +
+  scale_x_continuous( breaks = round(seq(min(incident_totals_by_year$`year(OCCUR_DATE)`),
+    max(incident_totals_by_year$`year(OCCUR_DATE)`), 
+    by = 2),1)) +
+  labs(title = "NYC Shooting Victims Since 2006", y="Number of Victims", x="Year")
+
+```
+
+## Modeling Prediction of Victims who are Black based on Number of Incidents
+```{r model_data}
+victims_total_by_race <- incident_totals_by_year %>% full_join(victims_by_race)
+
+mod_black <- lm(count_black ~ count_incidents, data=victims_total_by_race)
+victim_pred_b <- victims_total_by_race %>% mutate(pred = predict(mod_black))
+
+victim_pred_b %>% ggplot(aes(x = count_incidents, y = pred)) + 
+  geom_point(aes(color="Predicted Value")) +
+  geom_point(aes(y = count_black, color="Actual Number of Black Victims")) +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90)) +
+  labs(title = "Prediction of Victims who are Black vs. Shooting Incidents", y="Number of Victims who are Black", x="Number of Shooting Incidents")
+  
+```
+
+## Conclusion
+
+The analysis shows that the amount of shootings in NYC has been decreasing since 2006, with the exception of years 2020 and 2021. As 2020 and 2021 are outliers, further analysis is required to understand the factors related to the unusual spike in shootings these two years. Additionally, it shows that the ratio of victims who are Black is significantly higher than other victims of other races. The lowest number of victims have historically been people of White or Native race. Another source of bias could be missing information about the general population distribution among the different races. A low population of a particular race could be related to the low number among their race. Another possible sources of bias could be the way the original shooting data was collected. If there is higher police presence in predominantly non-Caucasian neighborhoods, it could make it more likely for shootings to be identified by police and recorded. To mitigate bias, I chose to include victims with unknown races in my analysis, to ensure the results were not skewed by missing race information for certain victims. I also used clearly labeled axes with consistent scales to avoid distorting the visualization of data.
